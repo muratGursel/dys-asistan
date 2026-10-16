@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+# Kaldırma ve güncellemede çalışan yardımcıları durdur (güncellemeden sonra
+# postinst yeni sürümü başlatır).
+pkill -f '^/usr/bin/python3 /usr/bin/dys-asistan' 2>/dev/null || true
+
+find /usr/lib/python3/dist-packages/dysasistan -name __pycache__ -type d -prune -exec rm -rf {} +

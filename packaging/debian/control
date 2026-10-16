@@ -1,0 +1,17 @@
+Package: dys-asistan
+Version: @VERSION@
+Architecture: all
+Maintainer: Murat GÜRSEL <muratgursel@gmail.com>
+Installed-Size: @SIZE@
+Depends: python3 (>= 3.11), python3-gi, gir1.2-gtk-3.0, python3-pil, sane-utils, cups-client, xdg-utils, fonts-dejavu-core
+Recommends: sane-airscan, gir1.2-ayatanaappindicator3-0.1, gir1.2-notify-0.7
+Section: misc
+Priority: optional
+Homepage: https://github.com/muratGursel/dys-asistan
+Description: DYS için tarama ve yazdırma yardımcısı (EbysAsistan uyumlu)
+ Sağlık Bakanlığı DYS'nin "Tara" ve barkod yazdırma işlevlerini Pardus'ta
+ çalıştırır. Windows'taki EbysAsistan ile aynı yerel adresi (62222) ve
+ aynı istek biçimlerini kullanır; DYS tarafında değişiklik gerekmez.
+ Tarama SANE ile yapılır (USB tarayıcılar ve ağdaki eSCL/AirScan destekli
+ çok işlevli yazıcılar), yazdırma CUPS ile. Oturum açıldığında sistem
+ çekmecesinde kendiliğinden başlar.

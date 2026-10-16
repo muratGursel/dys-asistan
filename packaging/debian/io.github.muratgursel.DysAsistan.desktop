@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DYS Asistan
+Comment=DYS için tarama ve yazdırma yardımcısı
+Exec=dys-asistan
+Icon=io.github.muratgursel.DysAsistan
+Terminal=false
+Categories=Office;Scanning;
+Keywords=DYS;EBYS;tarama;tarayıcı;barkod;sağlık;
+StartupNotify=false

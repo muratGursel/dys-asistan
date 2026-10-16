@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DYS Asistan deneme sayfası</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 900px; }
+  button { margin: 2px 4px 2px 0; padding: 6px 10px; }
+  select, input { padding: 4px; }
+  pre { background: #f3f3f3; padding: 10px; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; }
+  .not { color: #555; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>DYS Asistan deneme sayfası</h1>
+<p class="not">DYS'nin yerel ajana gönderdiği istekleri taklit eder. Ajan yalnızca izin verilen kaynaklardan
+gelen istekleri kabul eder; bu sayfayı denemek için:<br>
+<code>python3 -m http.server 8000 -d tools</code> ve
+<code>dys-asistan --izin-ver http://localhost:8000</code>, ardından http://localhost:8000/sahte_dys.html</p>
+
+<p>
+  <button id="canli">IsAlive</button>
+  <button id="liste">Tarayıcıları listele</button>
+  <select id="tarayicilar"></select>
+  <button id="tara">Tara</button>
+</p>
+<p>
+  <button id="dosyalar">Dosyalar</button>
+  <select id="dosya"></select>
+  <button id="ac">Aç</button>
+  <button id="klasor">Klasörü aç</button>
+  <button id="sil">Sil</button>
+</p>
+<p>
+  <button id="yazicilar">Yazıcılar</button>
+  <select id="yazici"></select>
+  <button id="barkod">Barkod etiketi yazdır</button>
+  <label><input type="checkbox" id="pencere"> yazıcıyı sor</label>
+</p>
+<pre id="cikti"></pre>
+
+<script>
+const ADRES = "http://localhost:62222/";
+const TOKEN = "deneme-token";
+const cikti = document.getElementById("cikti");
+const yaz = (m) => { cikti.textContent = new Date().toLocaleTimeString() + "  " + m + "\n" + cikti.textContent; };
+
+async function iste(uc, govde) {
+  const y = await fetch(ADRES + uc, { method: "POST", body: JSON.stringify(Object.assign({ token: TOKEN }, govde || {})) });
+  const veri = await y.json();
+  yaz(uc + " → " + y.status + " " + JSON.stringify(veri));
+  return veri;
+}
+function doldur(id, liste, deger, etiket, secili) {
+  const s = document.getElementById(id);
+  s.innerHTML = "";
+  for (const x of liste) {
+    const o = new Option(x[etiket], x[deger]);
+    if (secili && x[secili]) o.selected = true;
+    s.add(o);
+  }
+}
+const tikla = (id, f) => document.getElementById(id).onclick = () => f().catch(h => yaz("HATA " + h));
+
+tikla("canli", () => iste("IsAlive"));
+tikla("liste", async () => doldur("tarayicilar", await iste("GetActiveScanners"), "scannerName", "scannerName", "isDefault"));
+tikla("tara", () => iste("StartScan", { scannerName: document.getElementById("tarayicilar").value }));
+tikla("dosyalar", async () => doldur("dosya", await iste("GetAllFileInfos"), "path", "name"));
+tikla("ac", () => iste("OpenPdf", { path: document.getElementById("dosya").value }));
+tikla("klasor", () => iste("OpenDirectory", { path: document.getElementById("dosya").value }));
+tikla("sil", () => iste("DeletePdf", { path: document.getElementById("dosya").value }));
+tikla("yazicilar", async () => doldur("yazici", await iste("GetActivePrinters"), "printerName", "printerName", "isDefault"));
+tikla("barkod", () => iste("StartPrint", {
+  contentType: "barcode", printerName: document.getElementById("yazici").value, copyCount: 1,
+  printerDialog: document.getElementById("pencere").checked,
+  code: "E-12345678-000-0001", documentNumber: "E-12345678-000-0001", documentDate: "17.10.2026",
+  generalDepartmentName: "T.C. SAĞLIK BAKANLIĞI", detsisDepartmentName: "Deneme Hastanesi",
+  creatorDepartmentName: "Bilgi İşlem Birimi"
+}));
+</script>
+</body>
+</html>

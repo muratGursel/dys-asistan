@@ -1,0 +1,36 @@
+#!/bin/sh
+set -e
+
+# Açık grafik oturumlarda yardımcıyı hemen başlatır; sonraki oturumlarda
+# /etc/xdg/autostart başlatır.
+oturumlarda_baslat() {
+    command -v loginctl >/dev/null 2>&1 || return 0
+    for s in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+        tur=$(loginctl show-session "$s" -p Type --value 2>/dev/null || true)
+        durum=$(loginctl show-session "$s" -p State --value 2>/dev/null || true)
+        sinif=$(loginctl show-session "$s" -p Class --value 2>/dev/null || true)
+        case "$tur" in x11|wayland) ;; *) continue ;; esac
+        [ "$sinif" = "user" ] || continue
+        [ "$durum" = "active" ] || [ "$durum" = "online" ] || continue
+        kullanici=$(loginctl show-session "$s" -p Name --value)
+        uid=$(id -u "$kullanici" 2>/dev/null) || continue
+        pgrep -u "$uid" -f '^/usr/bin/python3 /usr/bin/dys-asistan' >/dev/null 2>&1 && continue
+        # oturumun ortamını (DISPLAY, WAYLAND_DISPLAY, DBUS) bir masaüstü sürecinden al
+        ortam=""
+        for p in $(pgrep -u "$uid" -f 'xfce4-session|gnome-session|gnome-shell|cinnamon-session|mate-session|plasmashell' 2>/dev/null); do
+            if [ -r "/proc/$p/environ" ] && tr '\0' '\n' <"/proc/$p/environ" | grep -q '^\(DISPLAY\|WAYLAND_DISPLAY\)='; then
+                ortam=$(tr '\0' '\n' <"/proc/$p/environ" | grep '^\(DISPLAY\|WAYLAND_DISPLAY\|XAUTHORITY\|DBUS_SESSION_BUS_ADDRESS\|XDG_RUNTIME_DIR\|XDG_CURRENT_DESKTOP\)=' | tr '\n' ' ')
+                break
+            fi
+        done
+        [ -n "$ortam" ] || continue
+        # shellcheck disable=SC2086
+        runuser -u "$kullanici" -- env $ortam setsid /usr/bin/dys-asistan </dev/null >/dev/null 2>&1 &
+    done
+    return 0
+}
+
+if [ "$1" = "configure" ]; then
+    python3 -m compileall -q /usr/lib/python3/dist-packages/dysasistan || true
+    oturumlarda_baslat || true
+fi

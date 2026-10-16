@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DYS Asistan
+Comment=DYS için tarama ve yazdırma yardımcısı
+Exec=dys-asistan
+Icon=io.github.muratgursel.DysAsistan
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
