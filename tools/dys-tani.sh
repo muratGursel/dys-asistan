@@ -7,15 +7,20 @@
 # besleyiciye 2 sayfa koyun: iki deneme taraması yapılır.
 #
 #   sh dys-tani.sh
+#   sh dys-tani.sh --derin     # tarama çöküyorsa: besleyiciye 10 sayfa koyun;
+#                              # sebebi daraltmak için seçenekleri tek tek değiştirerek tarar
 #
 # Çıktıda DYS oturum bilgisi (token) bulunmaz.
 
 CIKTI="$HOME/dys-tani.txt"
+DERIN=0
+[ "${1:-}" = "--derin" ] && DERIN=1
 sebep() { echo "  >> OLASI SEBEP: $*"; }
 baslik() { echo; echo "== $*"; }
 
 {
 echo "DYS Asistan tanılama — $(date '+%d.%m.%Y %H:%M:%S')"
+[ $DERIN -eq 1 ] && echo "(derin tanılama)"
 
 baslik "Sistem"
 . /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"
@@ -99,7 +104,8 @@ else
     echo "$SECENEK" | grep -E "^\s+(--source|--mode|--resolution|-[lxyt]|--page-width|--page-height)\b" | sed 's/^/  /'
     YMAX=$(echo "$SECENEK" | sed -n 's/^\s*-y [0-9.]*\.\.\([0-9.]*\)mm.*/\1/p')
     PHMAX=$(echo "$SECENEK" | sed -n 's/^\s*--page-height [0-9.]*\.\.\([0-9.]*\)mm.*/\1/p')
-    echo "  en fazla tarama boyu: ${YMAX:-?} mm; sayfa boyu seçeneği: ${PHMAX:+var (en fazla $PHMAX mm)}${PHMAX:-yok}"
+    if [ -n "$PHMAX" ]; then SAYFA="var (en fazla $PHMAX mm)"; else SAYFA="yok"; fi
+    echo "  en fazla tarama boyu: ${YMAX:-?} mm; sayfa boyu seçeneği: $SAYFA"
     if [ -n "$YMAX" ] && [ "${YMAX%.*}" -lt 297 ]; then
         if [ -n "$PHMAX" ]; then
             echo "  NOT: Tarama boyu varsayılan olarak ${YMAX} mm; A4 için önce --page-height 297 verilmeli."
@@ -108,48 +114,109 @@ else
         fi
     fi
 
-    tara() {   # $1 açıklama, sonra scanimage seçenekleri
-        ad="$1"; shift
+    COKEN=""   # ilk çöken denemenin biçimi ve seçenekleri (derin kipte sürücü günlüğüyle yinelenir)
+    kod=0
+    tara() {   # $1 açıklama, $2 biçim (png/pnm/tiff), sonra scanimage seçenekleri
+        ad="$1"; bicim="$2"; shift 2
         echo; echo "-- $ad"
-        echo "   scanimage -d '$D' $*"
+        echo "   scanimage -d '$D' $* --format=$bicim"
         echo "   ... taranıyor (en fazla 2 dakika)"
-        rm -f /tmp/dys-tani.png
-        timeout 120 scanimage -d "$D" "$@" --format=png -o /tmp/dys-tani.png >/tmp/dys-tani.err 2>&1
+        rm -f /tmp/dys-tani.img
+        timeout 120 scanimage -d "$D" "$@" --format="$bicim" -o /tmp/dys-tani.img >/tmp/dys-tani.err 2>&1
         kod=$?
         sed 's/^/   /' /tmp/dys-tani.err
-        if [ $kod -eq 0 ] && [ -s /tmp/dys-tani.png ]; then
-            echo "   SONUÇ: başarılı ($(stat -c %s /tmp/dys-tani.png) bayt)"
-        else
-            echo "   SONUÇ: başarısız (çıkış kodu $kod)"
-            hata=$(grep -v -i "rounded value" /tmp/dys-tani.err | tail -1)
-            case "$hata" in
-                *"out of documents"*|*"No more documents"*|*"no documents"*)
-                    sebep "Besleyicide kağıt yok ya da kağıt algılanmadı: sayfayı besleyiciye tam oturtun." ;;
-                *"busy"*|*"Device busy"*)
-                    sebep "Tarayıcı meşgul: başka bir tarama uygulamasını kapatıp yeniden deneyin." ;;
-                *"denied"*|*"permission"*)
-                    sebep "Erişim izni yok: oturumu kapatıp açın; sürmezse kullanıcıyı 'scanner' grubuna ekleyin." ;;
-                *"jammed"*|*"Jam"*)
-                    sebep "Kağıt sıkışması: besleyiciyi açıp kağıdı çıkarın." ;;
-                *"cover"*|*"Cover"*)
-                    sebep "Tarayıcının kapağı açık." ;;
-                *"I/O"*)
-                    sebep "Cihazla iletişim hatası (I/O): USB kablosunu çıkarıp takın, tarayıcıyı kapatıp açın." ;;
-                *"Invalid argument"*)
-                    sebep "Cihaz bir seçeneği kabul etmedi: $hata" ;;
-            esac
+        if [ $kod -eq 0 ] && [ -s /tmp/dys-tani.img ]; then
+            echo "   SONUÇ: başarılı ($(stat -c %s /tmp/dys-tani.img) bayt)"
+            return
         fi
+        echo "   SONUÇ: başarısız (çıkış kodu $kod)"
+        case $kod in
+            134|136|139)
+                case $kod in 134) tur="abort";; 136) tur="kayan nokta hatası";; *) tur="bellek hatası";; esac
+                echo "   >> scanimage çöktü ($tur)"
+                [ -n "$COKEN" ] || COKEN="$bicim|$*"
+                if [ $DERIN -eq 0 ]; then
+                    sebep "scanimage tarama sırasında çöküyor (SANE sürücü hatası). Sebebi daraltmak için besleyiciye 10 sayfa koyup derin tanılama çalıştırın (kılavuzda: 'Derin tanılama')."
+                else
+                    sebep "scanimage tarama sırasında çöküyor (SANE sürücü hatası); hangi seçeneklerde çöktüğü 'Derin tanılama özeti' tablosunda."
+                fi
+                return ;;
+            124)
+                sebep "Tarama 2 dakikada bitmedi: tarayıcı yanıt vermiyor; kapatıp açın."
+                return ;;
+        esac
+        hata=$(grep -v -i "rounded value" /tmp/dys-tani.err | tail -1)
+        case "$hata" in
+            *"out of documents"*|*"No more documents"*|*"no documents"*)
+                sebep "Besleyicide kağıt yok ya da kağıt algılanmadı: sayfayı besleyiciye tam oturtun." ;;
+            *"busy"*|*"Device busy"*)
+                sebep "Tarayıcı meşgul: başka bir tarama uygulamasını kapatıp yeniden deneyin." ;;
+            *"denied"*|*"permission"*)
+                sebep "Erişim izni yok: oturumu kapatıp açın; sürmezse kullanıcıyı 'scanner' grubuna ekleyin." ;;
+            *"jammed"*|*"Jam"*)
+                sebep "Kağıt sıkışması: besleyiciyi açıp kağıdı çıkarın." ;;
+            *"cover"*|*"Cover"*)
+                sebep "Tarayıcının kapağı açık." ;;
+            *"I/O"*)
+                sebep "Cihazla iletişim hatası (I/O): USB kablosunu çıkarıp takın, tarayıcıyı kapatıp açın." ;;
+            *"Invalid argument"*)
+                sebep "Cihaz bir seçeneği kabul etmedi: $hata" ;;
+        esac
     }
 
-    baslik "Deneme taramaları (her biri besleyiciden 1 sayfa çeker)"
-    tara "1) en az seçenekle"
-    if [ -n "$PHMAX" ]; then
-        tara "2) A4, önce sayfa boyu ayarlanarak (DYS Asistan'ın düzeltilmiş yöntemi)" \
-            --resolution 200 --mode Gray --page-width 210 --page-height 297 -x 210 -y 297
+    if [ -n "$PHMAX" ]; then A4="--page-width 210 --page-height 297 -x 210 -y 297"; else A4="-x 210 -y 297"; fi
+
+    if [ $DERIN -eq 0 ]; then
+        baslik "Deneme taramaları (her biri besleyiciden 1 sayfa çeker)"
+        tara "1) en az seçenekle" png
+        # shellcheck disable=SC2086
+        tara "2) A4, önce sayfa boyu ayarlanarak (DYS Asistan'ın yöntemi)" png --resolution 200 --mode Gray $A4
     else
-        tara "2) A4" --resolution 200 --mode Gray -x 210 -y 297
+        baslik "Derin tanılama: seçenekler tek tek değiştirilerek (her biri 1 sayfa çeker)"
+        echo "  Amaç: çökmenin görüntü biçiminden mi, çözünürlükten mi, renkten mi,"
+        echo "  sayfa boyu ayarından mı kaynaklandığını ayırmak."
+        TABLO=""
+        dene() {   # $1 kısa ad, $2 biçim, sonra seçenekler
+            kisa="$1"; shift
+            tara "$kisa" "$@"
+            if [ $kod -eq 0 ] && [ -s /tmp/dys-tani.img ]; then durum="başarılı"
+            else case $kod in 134|136|139) durum="ÇÖKTÜ ($kod)";; *) durum="hata ($kod)";; esac; fi
+            TABLO="$TABLO
+  $(printf '%-44s %s' "$kisa" "$durum")"
+        }
+        # shellcheck disable=SC2086
+        {
+        dene "D1  PNM, varsayılan seçenekler"         pnm
+        dene "D2  PNG, varsayılan seçenekler"         png
+        dene "D3  TIFF, varsayılan seçenekler"        tiff
+        dene "D4  PNM, 200 dpi gri"                   pnm --resolution 200 --mode Gray
+        dene "D5  PNM, 300 dpi gri"                   pnm --resolution 300 --mode Gray
+        dene "D6  PNM, 200 dpi siyah-beyaz"           pnm --resolution 200 --mode Lineart
+        dene "D7  PNM, 200 dpi renkli"                pnm --resolution 200 --mode Color
+        dene "D8  PNM, 200 dpi gri, A4 sayfa boyu"    pnm --resolution 200 --mode Gray $A4
+        dene "D9  PNG, 200 dpi gri, A4 (DYS Asistan)" png --resolution 200 --mode Gray $A4
+        }
+
+        baslik "Derin tanılama özeti"
+        echo "$TABLO"
+
+        if [ -n "$COKEN" ]; then
+            baslik "Sürücü ayrıntılı günlüğü (ilk çöken deneme yineleniyor, 1 sayfa çeker)"
+            bicim=${COKEN%%|*}; secenek=${COKEN#*|}
+            echo "  seçenekler: $secenek --format=$bicim"
+            echo "  ... taranıyor"
+            # cihazın sürücüsüne göre: canon_dr:… -> SANE_DEBUG_CANON_DR
+            hata_ayiklama="SANE_DEBUG_$(echo "${D%%:*}" | tr 'a-z' 'A-Z')=20"
+            echo "  ayrıntı: $hata_ayiklama"
+            # shellcheck disable=SC2086
+            env "$hata_ayiklama" SANE_DEBUG_DLL=1 timeout 120 scanimage -d "$D" $secenek \
+                --format="$bicim" -o /tmp/dys-tani.img >/dev/null 2>/tmp/dys-tani.dbg
+            echo "  çıkış kodu: $?; günlüğün son 120 satırı:"
+            tail -120 /tmp/dys-tani.dbg | sed 's/^/    /'
+            rm -f /tmp/dys-tani.dbg
+        fi
     fi
-    rm -f /tmp/dys-tani.png /tmp/dys-tani.err
+    rm -f /tmp/dys-tani.img /tmp/dys-tani.err
 fi
 
 baslik "DYS Asistan"

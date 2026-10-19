@@ -87,6 +87,21 @@ toplar, olası sebepleri inceler ve sonucu bir dosyaya yazar.
 3. Araç ağdaki tarayıcıları da aradığı için 1-2 dakika sürer. Bitince sonuç
    **`~/dys-tani.txt`** dosyasına yazılır ve dosyanın yolu ekranda gösterilir.
 
+### Derin tanılama
+
+Deneme taramalarında **"scanimage çöktü"** görülüyorsa (SANE sürücü hatası),
+sebebi daraltmak için derin tanılama çalıştırın. Besleyiciye **10 sayfa**
+koyun; araç görüntü biçimini, çözünürlüğü, rengi ve sayfa boyu ayarını tek tek
+değiştirerek 9 deneme taraması yapar, sonuçları bir tabloda gösterir ve ilk
+çöken denemeyi sürücünün ayrıntılı günlüğüyle yineler:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/muratGursel/dys-asistan/main/tools/dys-tani.sh | sh -s -- --derin
+```
+
+Dosyayla çalıştırırken: `sh dys-tani.sh --derin`. Sonuç yine
+`~/dys-tani.txt` dosyasına yazılır.
+
 Dosyanın sonundaki **"Özet: olası sebepler"** bölümü bulunan sorunları ve
 çözüm önerilerini listeler. Sorunu çözemezseniz dosyayı
 [Issues](https://github.com/muratGursel/dys-asistan/issues) sayfasında yeni
