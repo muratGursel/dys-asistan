@@ -1,11 +1,13 @@
 import os
 import subprocess
 
+import pytest
+
 from PIL import Image
 
 from dysasistan import code128, pdf, yazdirma
 from dysasistan.ayarlar import Ayarlar
-from dysasistan.tarama import TaramaYoneticisi, liste_ayristir
+from dysasistan.tarama import TaramaHatasi, TaramaYoneticisi, liste_ayristir, yetenek_ayristir
 
 # Pardus 25 / sane-utils 1.3.1 üzerinde görülen gerçek biçimler
 LISTE = (
@@ -40,22 +42,68 @@ class Sonuc:
         self.returncode, self.stdout, self.stderr = kod, cikti, hata
 
 
-def test_tarama_komutu_ve_cok_sayfa(tmp_path, monkeypatch):
-    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
-    komutlar = []
+# scanimage -A çıktısı biçimleri
+KYOCERA_A = """  Scan mode:
+    --mode Lineart|Gray|Color [Lineart]
+    --resolution 200|300|400|600dpi [200]
+    --source Flatbed|ADF|ADF Duplex [Flatbed]
+  Geometry:
+    -l 0..205.994mm [0]
+    -t 0..346.033mm [0]
+    -x 9.99066..215.985mm [215.985]
+    -y 9.99066..356.023mm [356.023]
+"""
+# canon_dr (Canon DR-C225 gibi camsız, besleyicili tarayıcılar): tarama alanı sayfa
+# boyuyla sınırlı, sayfa boyu varsayılan olarak Letter (279.364 mm)
+CANON_DR_A = """  Standard:
+    --source ADF Front|ADF Back|ADF Duplex [ADF Front]
+    --mode Lineart|Halftone|Gray|Color [Lineart]
+    --resolution 100..600dpi (in steps of 1) [600]
+  Geometry:
+    -t 0..279.364mm (in steps of 0.0211639) [0]
+    -l 0..215.9mm (in steps of 0.0211639) [0]
+    -x 0..215.9mm (in steps of 0.0211639) [215.872]
+    -y 0..279.364mm (in steps of 0.0211639) [279.364]
+    --page-width 0..215.9mm (in steps of 0.0211639) [215.872]
+    --page-height 0..3000mm (in steps of 0.0211639) [279.364]
+"""
+TUKENDI = "scanimage: sane_start: Document feeder out of documents"
 
-    def calistir(komut, **_):
-        komutlar.append(komut)
+
+class SahteScanimage:
+    """-f (liste), -A (seçenekler), -o (tek sayfa) ve --batch (besleyici) çağrılarını taklit eder."""
+
+    def __init__(self, secenekler="", kagit=0):
+        self.secenekler, self.kagit, self.komutlar = secenekler, kagit, []
+
+    def __call__(self, komut, **_):
+        self.komutlar.append(komut)
         if "-f" in komut:
             return Sonuc(cikti=LISTE)
-        Image.new("L", (10, 10), 255).save(komut[komut.index("-o") + 1], "PNG")
-        return Sonuc()
+        if "-A" in komut:
+            return Sonuc(cikti=self.secenekler)
+        if "-o" in komut:
+            Image.new("L", (10, 10), 255).save(komut[komut.index("-o") + 1], "PNG")
+            return Sonuc()
+        desen = next(k for k in komut if k.startswith("--batch="))[len("--batch="):]
+        bas = int(next(k for k in komut if k.startswith("--batch-start="))[len("--batch-start="):])
+        for i in range(self.kagit):
+            Image.new("L", (10, 10), 255).save(desen % (bas + i), "PNG")
+        self.kagit = 0
+        return Sonuc(7, hata=TUKENDI)
 
+    def taramalar(self):
+        return [k for k in self.komutlar if "-o" in k or any(a.startswith("--batch=") for a in k)]
+
+
+def test_tarama_komutu_ve_cok_sayfa(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    s = SahteScanimage()
     ayarlar = Ayarlar(str(tmp_path / "a.json"))
-    y = TaramaYoneticisi(ayarlar, calistir=calistir)
+    y = TaramaYoneticisi(ayarlar, calistir=s)
     sayfalar = y.tara("Canon LiDE 220", devam_sor=lambda n: n < 3)
     assert len(sayfalar) == 3
-    tarama = komutlar[1]
+    tarama = s.taramalar()[0]
     assert tarama[:3] == ["scanimage", "-d", "genesys:libusb:001:004"]
     assert "--resolution" in tarama and "--mode" in tarama
     assert tarama[tarama.index("-x"):tarama.index("-x") + 4] == ["-x", "210", "-y", "297"]
@@ -67,23 +115,98 @@ def test_tarama_komutu_ve_cok_sayfa(tmp_path, monkeypatch):
     assert not os.path.exists(os.path.dirname(sayfalar[0]))
 
 
-def test_gecersiz_secenekte_en_az_secenekle_yeniden_dener(tmp_path, monkeypatch):
+def test_basarisizlikta_en_az_secenekle_yeniden_dener(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
-    denemeler = []
+    s = SahteScanimage()
+    asil = s.__call__
 
-    def calistir(komut, **_):
-        if "-f" in komut:
-            return Sonuc(cikti=LISTE)
-        denemeler.append(komut)
-        if "--mode" in komut:
-            return Sonuc(1, hata="scanimage: setting of option --mode failed (Invalid argument)")
-        Image.new("L", (10, 10), 255).save(komut[komut.index("-o") + 1], "PNG")
-        return Sonuc()
+    def calistir(komut, **kw):
+        if "--mode" in komut and "-o" in komut:
+            s.komutlar.append(komut)
+            return Sonuc(1, hata="scanimage: rounded value of br-y from 297 to 279.364\n"
+                                 "scanimage: sane_start: Error during device I/O")
+        return asil(komut, **kw)
 
     ayarlar = Ayarlar(str(tmp_path / "a.json"))
     ayarlar.yaz("ScanMorePagesDialog", False)
     assert len(TaramaYoneticisi(ayarlar, calistir=calistir).tara("")) == 1
-    assert len(denemeler) == 2 and "--mode" not in denemeler[1]
+    taramalar = s.taramalar()
+    assert len(taramalar) == 2 and "--mode" not in taramalar[1]
+
+
+def test_hata_iletisi_bilgi_satirini_atlar(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+
+    def calistir(komut, **_):
+        if "-f" in komut:
+            return Sonuc(cikti=LISTE)
+        if "-A" in komut:
+            return Sonuc(cikti="")
+        return Sonuc(1, hata="scanimage: rounded value of br-y from 297 to 279.364\n"
+                             "scanimage: open of device genesys:libusb:001:004 failed: "
+                             "Access to resource has been denied\n"
+                             "scanimage: rounded value of br-x from 210 to 209.9")
+
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    with pytest.raises(TaramaHatasi) as h:
+        TaramaYoneticisi(ayarlar, calistir=calistir).tara("Canon LiDE 220")
+    assert "Access to resource has been denied" in str(h.value)
+    assert "rounded" not in str(h.value)
+
+
+def test_alan_cihaz_sinirina_kirpilir():
+    y = yetenek_ayristir(KYOCERA_A)
+    assert (y.x_max, y.y_max, y.sayfa_yuk_max) == (215.985, 356.023, None)
+    assert y.kaynaklar == ["Flatbed", "ADF", "ADF Duplex"] and y.kaynak_varsayilan == "Flatbed"
+    assert y.alan_secenekleri(210, 297) == ["-x", "210", "-y", "297"]
+    letter = yetenek_ayristir("    -x 0..215.9mm [215.9]\n    -y 0..279.4mm [279.4]\n")
+    assert letter.alan_secenekleri(210, 297) == ["-x", "210", "-y", "279.4"]
+
+
+def test_canon_dr_sayfa_boyu_ve_besleyici(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    y = yetenek_ayristir(CANON_DR_A)
+    assert y.kaynak_varsayilan == "ADF Front" and y.sayfa_yuk_max == 3000
+    # sayfa boyu -y'den önce büyütülmeli; yoksa -y 279.364'e yuvarlanır
+    assert y.alan_secenekleri(210, 297) == ["--page-width", "210", "--page-height", "297",
+                                            "-x", "210", "-y", "297"]
+
+    s = SahteScanimage(CANON_DR_A, kagit=3)
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    sorular = []
+
+    def devam(n):
+        sorular.append(n)
+        return False
+
+    sayfalar = TaramaYoneticisi(ayarlar, calistir=s).tara("genesys:libusb:001:004", devam_sor=devam)
+    assert len(sayfalar) == 3 and sorular == [3]          # besleyicideki 3 sayfa tek seferde
+    tarama = s.taramalar()[0]
+    assert "--batch-start=1" in tarama and "-o" not in tarama
+    assert tarama.index("--page-height") < tarama.index("-y")
+
+
+def test_besleyici_bos(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    with pytest.raises(TaramaHatasi, match="Besleyicide kağıt yok"):
+        TaramaYoneticisi(ayarlar, calistir=SahteScanimage(CANON_DR_A, kagit=0)).tara("genesys:libusb:001:004")
+
+
+def test_besleyicide_ikinci_deste(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    s = SahteScanimage(CANON_DR_A, kagit=2)
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+
+    def devam(n):
+        if n == 2:
+            s.kagit = 1          # kullanıcı ikinci desteyi koydu
+            return True
+        return False
+
+    sayfalar = TaramaYoneticisi(ayarlar, calistir=s).tara("genesys:libusb:001:004", devam_sor=devam)
+    assert [os.path.basename(p) for p in sayfalar] == ["sayfa001.png", "sayfa002.png", "sayfa003.png"]
+    assert "--batch-start=3" in s.taramalar()[1]
 
 
 def test_code128_sonu():

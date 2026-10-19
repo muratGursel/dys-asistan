@@ -81,10 +81,76 @@ def liste_ayristir(cikti):
     return tarayicilar
 
 
+BILGI_SATIRLARI = re.compile(r"rounded value of|^scanning page|^scanned page|^batch terminated|"
+                             r"^scanning \d+ pages|^output format", re.I)
+
+
+def hata_satiri(stderr):
+    """scanimage hata çıktısından kullanıcıya gösterilecek satır. 'rounded value of …'
+    gibi bilgi satırları asıl hatanın önüne geçmesin."""
+    satirlar = [s.strip() for s in (stderr or "").splitlines() if s.strip()]
+    anlamli = [s for s in satirlar if not BILGI_SATIRLARI.search(re.sub(r"^scanimage:\s*", "", s))]
+    return (anlamli or satirlar or [""])[-1]
+
+
+def besleyici_adi(kaynak):
+    k = (kaynak or "").lower()
+    return any(s in k for s in ("adf", "feeder", "besleyici", "duplex"))
+
+
+class Yetenek:
+    """scanimage -A çıktısından gerekenler (mm cinsinden; bilinmiyorsa None)."""
+
+    def __init__(self):
+        self.x_max = self.y_max = None
+        self.sayfa_gen_max = self.sayfa_yuk_max = None    # canon_dr, fujitsu vb.
+        self.kaynaklar, self.kaynak_varsayilan = [], ""
+
+    def alan_secenekleri(self, gen, yuk):
+        """İstenen sayfa boyutu için -x/-y (gerekirse önce --page-width/--page-height)
+        seçenekleri; değerler cihazın sınırlarına kırpılır."""
+        secenekler = []
+        if self.sayfa_gen_max is not None or self.sayfa_yuk_max is not None:
+            # besleyicili tarayıcılarda tarama alanı sayfa boyuyla sınırlıdır; önce sayfayı büyüt
+            if self.sayfa_gen_max is not None:
+                gen = min(gen, self.sayfa_gen_max)
+                secenekler += ["--page-width", "%g" % gen]
+            if self.sayfa_yuk_max is not None:
+                yuk = min(yuk, self.sayfa_yuk_max)
+                secenekler += ["--page-height", "%g" % yuk]
+        else:
+            if self.x_max is not None:
+                gen = min(gen, self.x_max)
+            if self.y_max is not None:
+                yuk = min(yuk, self.y_max)
+        return secenekler + ["-x", "%g" % gen, "-y", "%g" % yuk]
+
+
+_ARALIK = re.compile(r"^\s+(-x|-y|--page-width|--page-height)\s+-?[\d.]+\.\.([\d.]+)mm")
+_KAYNAK = re.compile(r"^\s+--source\s+(.+?)\s+\[(.*)\]\s*$")
+
+
+def yetenek_ayristir(cikti):
+    y = Yetenek()
+    for satir in cikti.splitlines():
+        m = _ARALIK.match(satir)
+        if m:
+            deger = float(m.group(2))
+            setattr(y, {"-x": "x_max", "-y": "y_max", "--page-width": "sayfa_gen_max",
+                        "--page-height": "sayfa_yuk_max"}[m.group(1)], deger)
+            continue
+        m = _KAYNAK.match(satir)
+        if m:
+            y.kaynaklar = [k.strip() for k in m.group(1).split("|") if k.strip()]
+            y.kaynak_varsayilan = "" if m.group(2) == "inactive" else m.group(2).strip()
+    return y
+
+
 class TaramaYoneticisi:
     def __init__(self, ayarlar, calistir=subprocess.run):
         self.ayarlar = ayarlar
         self._calistir = calistir
+        self._yetenekler = {}
         self._kilit = threading.Lock()
         self._liste_kilidi = threading.Lock()
         self._onbellek = None
@@ -131,69 +197,93 @@ class TaramaYoneticisi:
             return Tarayici(ad, ad)
         raise TaramaHatasi("Tarayıcı bulunamadı: %s" % (ad or "(tanımlı tarayıcı yok)"))
 
+    # ------------------------------------------------------------ yetenekler
+    def yetenekler(self, t):
+        """Cihazın seçeneklerini (scanimage -A) bir kez okur; okunamazsa boş Yetenek."""
+        if t.cihaz not in self._yetenekler:
+            try:
+                sonuc = self._calistir(["scanimage", "-d", t.cihaz, "-A"], capture_output=True, text=True,
+                                       timeout=LISTE_ZAMAN_ASIMI)
+                y = yetenek_ayristir(sonuc.stdout if sonuc.returncode == 0 else "")
+            except (OSError, subprocess.TimeoutExpired):
+                y = Yetenek()
+            self._yetenekler[t.cihaz] = y
+        return self._yetenekler[t.cihaz]
+
+    def besleyici_mi(self, t):
+        """Ayarlanan kaynak ya da (ayar boşsa) cihazın varsayılan kaynağı besleyici mi?"""
+        kaynak = self.ayarlar.oku("Source") or ""
+        if kaynak:
+            return besleyici_adi(kaynak)
+        y = self.yetenekler(t)
+        if y.kaynak_varsayilan:
+            return besleyici_adi(y.kaynak_varsayilan)
+        # camı olmayan, yalnızca besleyicili cihaz (ör. Canon DR-C225)
+        return bool(y.kaynaklar) and all(besleyici_adi(k) for k in y.kaynaklar)
+
     # ------------------------------------------------------------ tarama
     def _komut(self, t, cikti, toplu=False, en_az=False):
         komut = ["scanimage", "-d", t.cihaz, "--format=png"]
+        kaynak = self.ayarlar.oku("Source")
+        if kaynak:
+            komut += ["--source", kaynak]
         if not en_az:
             komut += ["--resolution", str(self.ayarlar.oku("Resolution"))]
             mod = self.ayarlar.oku("Mode")
             if mod:
                 komut += ["--mode", mod]
-            kaynak = self.ayarlar.oku("Source")
-            if kaynak:
-                komut += ["--source", kaynak]
             # cihazlar çoğunlukla tüm camı (Legal) tarar; evrak A4
             boyut = SAYFA_BOYUTLARI.get(self.ayarlar.oku("PageSize") or "")
             if boyut:
-                komut += ["-x", str(boyut[0]), "-y", str(boyut[1])]
+                komut += self.yetenekler(t).alan_secenekleri(*boyut)
         if toplu:
-            komut += ["--batch=" + cikti]
+            komut += ["--batch=" + cikti, "--batch-start=%d" % toplu]
         else:
             komut += ["-o", cikti]
         return komut
 
-    def _tek_tarama(self, t, cikti, toplu=False):
-        """Önce ayarlı seçeneklerle, cihaz reddederse en az seçenekle dener."""
-        son_hata = ""
+    def _tek_tarama(self, t, cikti, toplu=0):
+        """Önce ayarlı seçeneklerle, başaramazsa en az seçenekle dener.
+        toplu > 0 ise besleyiciden toplu tarar; sayfa numarası bu sayıdan başlar."""
+        ilk_hata = ""
         for en_az in (False, True):
             try:
                 sonuc = self._calistir(self._komut(t, cikti, toplu, en_az), capture_output=True, text=True,
                                        timeout=TARAMA_ZAMAN_ASIMI)
             except subprocess.TimeoutExpired:
                 raise TaramaHatasi("Tarayıcı zaman aşımına uğradı.")
-            if sonuc.returncode == 0:
+            hata = hata_satiri(sonuc.stderr)
+            if sonuc.returncode == 0 or (toplu and "out of documents" in (sonuc.stderr or "").lower()):
                 return
-            son_hata = (sonuc.stderr or "").strip().splitlines()[-1:] or [""]
-            son_hata = son_hata[0]
-            if "invalid argument" not in son_hata.lower() and "invalid" not in son_hata.lower():
-                break
-        if toplu and "out of documents" in son_hata.lower():
-            return
-        raise TaramaHatasi("Tarayıcıya erişilemedi: %s" % son_hata if son_hata else "Tarayıcıya erişilemedi.")
+            ilk_hata = ilk_hata or hata
+        raise TaramaHatasi("Tarayıcıya erişilemedi: %s" % ilk_hata if ilk_hata else "Tarayıcıya erişilemedi.")
 
     def tara(self, ad, devam_sor=None):
         """Sayfaları tarar ve görüntü dosyalarının listesini döndürür (geçici dizinde).
-        devam_sor(sayfa_sayisi) -> bool: bir sayfa daha taransın mı?"""
+        devam_sor(sayfa_sayisi) -> bool: başka sayfa taransın mı?"""
         if not self._kilit.acquire(blocking=False):
             raise TaramaHatasi("Tarayıcı şu anda başka bir tarama için kullanılıyor.")
         try:
             t = self.bul(ad)
             gecici = tempfile.mkdtemp(prefix="dys-tarama-")
-            kaynak = (self.ayarlar.oku("Source") or "").lower()
+            besleyici = self.besleyici_mi(t)
             sayfalar = []
-            if "adf" in kaynak or "feeder" in kaynak or "besleyici" in kaynak:
-                self._tek_tarama(t, os.path.join(gecici, "sayfa%03d.png"), toplu=True)
-                sayfalar = sorted(os.path.join(gecici, f) for f in os.listdir(gecici) if f.endswith(".png"))
-            else:
-                while True:
+            while True:
+                if besleyici:
+                    self._tek_tarama(t, os.path.join(gecici, "sayfa%03d.png"), toplu=len(sayfalar) + 1)
+                    sayfalar = sorted(os.path.join(gecici, f) for f in os.listdir(gecici)
+                                      if f.endswith(".png") and os.path.getsize(os.path.join(gecici, f)) > 0)
+                    if not sayfalar:
+                        raise TaramaHatasi("Besleyicide kağıt yok. Belgeyi tarayıcıya yerleştirip yeniden deneyin.")
+                else:
                     yol = os.path.join(gecici, "sayfa%03d.png" % (len(sayfalar) + 1))
                     self._tek_tarama(t, yol)
                     if os.path.exists(yol) and os.path.getsize(yol) > 0:
                         sayfalar.append(yol)
-                    if not self.ayarlar.oku("ScanMorePagesDialog") or devam_sor is None:
-                        break
-                    if not devam_sor(len(sayfalar)):
-                        break
+                if not self.ayarlar.oku("ScanMorePagesDialog") or devam_sor is None:
+                    break
+                if not devam_sor(len(sayfalar)):
+                    break
             self.ayarlar.yaz("DefaultScannerDevice", t.ad)
             return sayfalar
         finally:
