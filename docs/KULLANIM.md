@@ -50,6 +50,26 @@ ayarlanır, A4 yazıcılarda sayfaya sığdırılır.
 
 ## Sorun giderme
 
+**Kurulumda "SSL certificate problem: unable to get local issuer certificate".**
+Bilgisayar GitHub'ın sertifikasını doğrulayamıyor. Kurum ağlarında sebep
+çoğunlukla güvenlik duvarının HTTPS trafiğini kendi sertifikasıyla yeniden
+imzalamasıdır (SSL denetimi); tarayıcılar kurumun sertifikasına güvendiği
+için çalışır, uçbirimdeki `curl` ise tanımaz.
+
+- Hemen kurmak için: [Sürümler](https://github.com/muratGursel/dys-asistan/releases/latest)
+  sayfasından `dys-asistan_*_all.deb` dosyasını tarayıcıyla indirip
+  `sudo apt install ~/İndirilenler/dys-asistan_*_all.deb` ile kurun.
+- Kalıcı çözüm: bilgi işlemden kurumun kök sertifikasını alıp sisteme ekleyin:
+  `sudo cp kurum-kok.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`.
+- Sertifikayı kimin verdiğini görmek için:
+  `echo | openssl s_client -connect api.github.com:443 -servername api.github.com 2>/dev/null | openssl x509 -noout -issuer`.
+  GitHub'ın sağlayıcısı yerine bir güvenlik duvarı ya da kurum adı
+  görünüyorsa sebep SSL denetimidir.
+- Sistem saati yanlışsa da aynı hata görülür; `date` ile denetleyin.
+
+Kurulum betiği bağlantı doğrulamasını hiçbir zaman kapatmaz: doğrulanmamış
+bir bağlantıdan yönetici yetkisiyle paket kurmak güvenli değildir.
+
 **Tarayıcı listede yok.**
 `dys-asistan --tarayicilari-listele` çıktısına bakın. Boşsa:
 
