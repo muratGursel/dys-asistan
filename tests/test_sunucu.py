@@ -118,8 +118,10 @@ def test_tarama_pdf_uretir_ve_listelenir(ortam):
 
 
 def test_tarama_hatasi(ortam):
-    ortam["uyg"].tarayici.hata = TaramaHatasi("cihaz meşgul")
-    assert iste(ortam["port"], "StartScan", {"token": "t"})[:2] == (500, "Tarayıcıya erişilemedi")
+    # tarama katmanının Türkçe iletisi DYS'ye olduğu gibi gider
+    ortam["uyg"].tarayici.hata = TaramaHatasi("Kağıt sıkıştı. Besleyiciyi açıp kağıdı çıkarın ve yeniden deneyin.")
+    assert iste(ortam["port"], "StartScan", {"token": "t"})[:2] == (
+        500, "Kağıt sıkıştı. Besleyiciyi açıp kağıdı çıkarın ve yeniden deneyin.")
 
 
 def test_silme_klasor_disi_reddedilir(ortam, tmp_path):

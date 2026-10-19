@@ -93,6 +93,43 @@ def hata_satiri(stderr):
     return (anlamli or satirlar or [""])[-1]
 
 
+# scanimage'ın çökmesi: subprocess sinyali eksi kodla, kabuk 128+sinyal ile bildirir
+COKME_KODLARI = {-6, -8, -11, 134, 136, 139}
+KAGIT_SIKISTI = re.compile(r"jam", re.I)
+
+
+def cokme_iletisi(kod):
+    return "tarayıcı sürücüsü çöktü (%s)" % {-6: "abort", 134: "abort", -8: "kayan nokta hatası",
+                                             136: "kayan nokta hatası"}.get(kod, "bellek hatası")
+
+
+def kullanici_iletisi(hata):
+    """scanimage iletisini DYS'de gösterilecek Türkçe iletiye çevirir."""
+    h = (hata or "").lower()
+    if "jam" in h:
+        return "Kağıt sıkıştı. Besleyiciyi açıp kağıdı çıkarın ve yeniden deneyin."
+    if "out of documents" in h or "no documents" in h:
+        return "Besleyicide kağıt yok. Belgeyi tarayıcıya yerleştirip yeniden deneyin."
+    if "cover" in h:
+        return "Tarayıcının kapağı açık."
+    if "busy" in h:
+        return "Tarayıcı meşgul. Başka bir tarama uygulaması açıksa kapatıp yeniden deneyin."
+    if "denied" in h or "permission" in h:
+        return "Tarayıcıya erişim izni yok. Oturumu kapatıp açın."
+    return "Tarayıcıya erişilemedi: %s" % hata if hata else "Tarayıcıya erişilemedi."
+
+
+def kipe_cevir(yol, mod):
+    """Renkli taranmış sayfayı istenen kipe (Gray / Lineart) çevirir."""
+    from PIL import Image
+    with Image.open(yol) as g:
+        g.load()
+        gri = g.convert("L")
+    if (mod or "").lower() == "lineart":
+        gri = gri.point(lambda v: 255 if v > 160 else 0, mode="1")
+    gri.save(yol, "PNG")
+
+
 def besleyici_adi(kaynak):
     k = (kaynak or "").lower()
     return any(s in k for s in ("adf", "feeder", "besleyici", "duplex"))
@@ -221,16 +258,30 @@ class TaramaYoneticisi:
         # camı olmayan, yalnızca besleyicili cihaz (ör. Canon DR-C225)
         return bool(y.kaynaklar) and all(besleyici_adi(k) for k in y.kaynaklar)
 
+    # ------------------------------------------------------------ renkli tarama zorunluluğu
+    def renkli_zorunlu(self, t):
+        """Gri/siyah-beyaz taramada sürücüsü çöken, bu yüzden renkli taranıp yazılımda
+        dönüştürülen cihaz mı? (ör. Canon DR-C225, canon_dr / SANE 1.3.1)"""
+        return t.cihaz in (self.ayarlar.oku("ColorOnlyScanners") or [])
+
+    def _renkli_zorunlu_isaretle(self, t):
+        liste = list(self.ayarlar.oku("ColorOnlyScanners") or [])
+        if t.cihaz not in liste:
+            liste.append(t.cihaz)
+            self.ayarlar.yaz("ColorOnlyScanners", liste)
+
     # ------------------------------------------------------------ tarama
-    def _komut(self, t, cikti, toplu=False, en_az=False):
+    def _komut(self, t, cikti, toplu=False, en_az=False, renkli=False):
         komut = ["scanimage", "-d", t.cihaz, "--format=png"]
         kaynak = self.ayarlar.oku("Source")
         if kaynak:
             komut += ["--source", kaynak]
+        if renkli:
+            komut += ["--mode", "Color"]
         if not en_az:
             komut += ["--resolution", str(self.ayarlar.oku("Resolution"))]
             mod = self.ayarlar.oku("Mode")
-            if mod:
+            if mod and not renkli:
                 komut += ["--mode", mod]
             # cihazlar çoğunlukla tüm camı (Legal) tarar; evrak A4
             boyut = SAYFA_BOYUTLARI.get(self.ayarlar.oku("PageSize") or "")
@@ -243,20 +294,38 @@ class TaramaYoneticisi:
         return komut
 
     def _tek_tarama(self, t, cikti, toplu=0):
-        """Önce ayarlı seçeneklerle, başaramazsa en az seçenekle dener.
+        """Önce ayarlı seçeneklerle, başaramazsa en az seçenekle dener. Gri/siyah-beyaz
+        taramada scanimage çökerse renkli yineler. Renkli tarandıysa True döndürür
+        (görüntü sonra istenen kipe çevrilmeli).
         toplu > 0 ise besleyiciden toplu tarar; sayfa numarası bu sayıdan başlar."""
+        mod = self.ayarlar.oku("Mode") or ""
+        gri_istendi = mod.lower() in ("gray", "lineart")
+        renkli = gri_istendi and self.renkli_zorunlu(t)
+        denemeler = [(False, renkli)]
         ilk_hata = ""
-        for en_az in (False, True):
+        while denemeler:
+            en_az, renkli = denemeler.pop(0)
             try:
-                sonuc = self._calistir(self._komut(t, cikti, toplu, en_az), capture_output=True, text=True,
-                                       timeout=TARAMA_ZAMAN_ASIMI)
+                sonuc = self._calistir(self._komut(t, cikti, toplu, en_az, renkli), capture_output=True,
+                                       text=True, timeout=TARAMA_ZAMAN_ASIMI)
             except subprocess.TimeoutExpired:
                 raise TaramaHatasi("Tarayıcı zaman aşımına uğradı.")
-            hata = hata_satiri(sonuc.stderr)
-            if sonuc.returncode == 0 or (toplu and "out of documents" in (sonuc.stderr or "").lower()):
-                return
-            ilk_hata = ilk_hata or hata
-        raise TaramaHatasi("Tarayıcıya erişilemedi: %s" % ilk_hata if ilk_hata else "Tarayıcıya erişilemedi.")
+            stderr = sonuc.stderr or ""
+            if sonuc.returncode == 0 or (toplu and "out of documents" in stderr.lower()):
+                return renkli
+            if sonuc.returncode in COKME_KODLARI and gri_istendi and not renkli:
+                # sürücü gri/siyah-beyaz kipte çöküyor: renkli tara, yazılımda dönüştür
+                self._renkli_zorunlu_isaretle(t)
+                denemeler = [(False, True)]
+                ilk_hata = ilk_hata or "tarayıcı sürücüsü çöktü"
+                continue
+            ilk_hata = ilk_hata or (cokme_iletisi(sonuc.returncode) if sonuc.returncode in COKME_KODLARI
+                                    else hata_satiri(stderr))
+            if not en_az:
+                denemeler.append((True, renkli))
+            if KAGIT_SIKISTI.search(stderr):
+                break        # yeniden denemek sıkışmayı kötüleştirir
+        raise TaramaHatasi(kullanici_iletisi(ilk_hata))
 
     def tara(self, ad, devam_sor=None):
         """Sayfaları tarar ve görüntü dosyalarının listesini döndürür (geçici dizinde).
@@ -269,17 +338,22 @@ class TaramaYoneticisi:
             besleyici = self.besleyici_mi(t)
             sayfalar = []
             while True:
+                once = set(sayfalar)
                 if besleyici:
-                    self._tek_tarama(t, os.path.join(gecici, "sayfa%03d.png"), toplu=len(sayfalar) + 1)
+                    renkli = self._tek_tarama(t, os.path.join(gecici, "sayfa%03d.png"), toplu=len(sayfalar) + 1)
                     sayfalar = sorted(os.path.join(gecici, f) for f in os.listdir(gecici)
                                       if f.endswith(".png") and os.path.getsize(os.path.join(gecici, f)) > 0)
                     if not sayfalar:
                         raise TaramaHatasi("Besleyicide kağıt yok. Belgeyi tarayıcıya yerleştirip yeniden deneyin.")
                 else:
                     yol = os.path.join(gecici, "sayfa%03d.png" % (len(sayfalar) + 1))
-                    self._tek_tarama(t, yol)
+                    renkli = self._tek_tarama(t, yol)
                     if os.path.exists(yol) and os.path.getsize(yol) > 0:
                         sayfalar.append(yol)
+                if renkli:
+                    for yol in sayfalar:
+                        if yol not in once:
+                            kipe_cevir(yol, self.ayarlar.oku("Mode"))
                 if not self.ayarlar.oku("ScanMorePagesDialog") or devam_sor is None:
                     break
                 if not devam_sor(len(sayfalar)):

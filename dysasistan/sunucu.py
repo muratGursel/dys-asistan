@@ -81,7 +81,7 @@ class Uygulama:
             sayfalar = self.tarayici.tara(g.get("scannerName") or "", self.devam_sor)
         except TaramaHatasi as h:
             gunluk.warning("tarama: %s", h)
-            raise IstekHatasi(500, str(h) if str(h).startswith("Tarayıcı") else "Tarayıcıya erişilemedi")
+            raise IstekHatasi(500, str(h) or "Tarayıcıya erişilemedi")
         except Exception:
             gunluk.exception("tarama")
             raise IstekHatasi(500, "Beklenmeyen hata")

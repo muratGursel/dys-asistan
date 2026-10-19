@@ -18,6 +18,7 @@ VARSAYILANLAR = {
     "Mode": "Gray",                 # Color / Gray / Lineart
     "Source": "",                   # boşsa tarayıcının varsayılanı (çoğunlukla camlı yüzey)
     "PageSize": "A4",               # A4 / A5 / "" (cihazın tüm tarama alanı)
+    "ColorOnlyScanners": [],        # gri taramada sürücüsü çöken cihazlar: renkli taranıp çevrilir
     "AllowedOrigins": [             # tarayıcıdan gelen isteklerde izin verilen kaynaklar
         "https://*.saglik.gov.tr",
         "http://*.saglik.gov.tr",

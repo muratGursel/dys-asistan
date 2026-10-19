@@ -6,6 +6,11 @@
   A4'e ayarlanır, besleyicideki sayfalar tek seferde taranır, besleyici
   boşsa anlaşılır ileti verilir. Önceden "rounded value of br-y from 297 to
   279.364" iletisiyle tarama başarısız oluyordu.
+- Gri ya da siyah-beyaz taramada SANE sürücüsü çöken cihazlar (Canon
+  DR-C225 / canon_dr, SANE 1.3.1) renkli taranır ve sayfa yazılımda istenen
+  kipe çevrilir. Cihaz hatırlanır; sonraki taramalar doğrudan renkli yapılır.
+- Kağıt sıkışması, boş besleyici, açık kapak, meşgul cihaz ve izin hataları
+  DYS'de Türkçe iletiyle gösterilir; kağıt sıkıştığında tarama yinelenmez.
 - Tarama alanı her cihazda cihazın sınırına kırpılır.
 - Hata iletisinde scanimage'ın bilgi satırları yerine asıl hata gösterilir;
   her başarısızlıkta tarama en az seçenekle yeniden denenir.

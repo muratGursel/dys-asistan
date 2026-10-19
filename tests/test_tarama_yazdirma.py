@@ -73,8 +73,9 @@ TUKENDI = "scanimage: sane_start: Document feeder out of documents"
 class SahteScanimage:
     """-f (liste), -A (seçenekler), -o (tek sayfa) ve --batch (besleyici) çağrılarını taklit eder."""
 
-    def __init__(self, secenekler="", kagit=0):
+    def __init__(self, secenekler="", kagit=0, gri_coker=False):
         self.secenekler, self.kagit, self.komutlar = secenekler, kagit, []
+        self.gri_coker = gri_coker    # DR-C225 / canon_dr: gri ve siyah-beyaz kipte scanimage çöker
 
     def __call__(self, komut, **_):
         self.komutlar.append(komut)
@@ -82,13 +83,17 @@ class SahteScanimage:
             return Sonuc(cikti=LISTE)
         if "-A" in komut:
             return Sonuc(cikti=self.secenekler)
+        renkli = "--mode" in komut and komut[komut.index("--mode") + 1] == "Color"
+        if self.gri_coker and not renkli:
+            return Sonuc(-8, hata="Floating point exception")
+        kip, renk = ("RGB", (200, 120, 40)) if renkli else ("L", 255)
         if "-o" in komut:
-            Image.new("L", (10, 10), 255).save(komut[komut.index("-o") + 1], "PNG")
+            Image.new(kip, (10, 10), renk).save(komut[komut.index("-o") + 1], "PNG")
             return Sonuc()
         desen = next(k for k in komut if k.startswith("--batch="))[len("--batch="):]
         bas = int(next(k for k in komut if k.startswith("--batch-start="))[len("--batch-start="):])
         for i in range(self.kagit):
-            Image.new("L", (10, 10), 255).save(desen % (bas + i), "PNG")
+            Image.new(kip, (10, 10), renk).save(desen % (bas + i), "PNG")
         self.kagit = 0
         return Sonuc(7, hata=TUKENDI)
 
@@ -150,8 +155,8 @@ def test_hata_iletisi_bilgi_satirini_atlar(tmp_path, monkeypatch):
     ayarlar = Ayarlar(str(tmp_path / "a.json"))
     with pytest.raises(TaramaHatasi) as h:
         TaramaYoneticisi(ayarlar, calistir=calistir).tara("Canon LiDE 220")
-    assert "Access to resource has been denied" in str(h.value)
-    assert "rounded" not in str(h.value)
+    # bilgi satırı değil asıl hata ("denied") Türkçe iletiye çevrilir
+    assert str(h.value) == "Tarayıcıya erişim izni yok. Oturumu kapatıp açın."
 
 
 def test_alan_cihaz_sinirina_kirpilir():
@@ -184,6 +189,57 @@ def test_canon_dr_sayfa_boyu_ve_besleyici(tmp_path, monkeypatch):
     tarama = s.taramalar()[0]
     assert "--batch-start=1" in tarama and "-o" not in tarama
     assert tarama.index("--page-height") < tarama.index("-y")
+
+
+def test_gri_kipte_coken_surucu_renkli_taranir(tmp_path, monkeypatch):
+    # Canon DR-C225 (canon_dr, SANE 1.3.1): gri ve siyah-beyaz kipte scanimage çöküyor,
+    # renkli kipte tarıyor; renkli taranıp yazılımda griye çevrilmeli
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    s = SahteScanimage(CANON_DR_A, kagit=2, gri_coker=True)
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    yonetici = TaramaYoneticisi(ayarlar, calistir=s)
+    sayfalar = yonetici.tara("genesys:libusb:001:004")
+    assert len(sayfalar) == 2
+    taramalar = s.taramalar()
+    assert len(taramalar) == 2                                    # önce gri (çöktü), sonra renkli
+    assert taramalar[1][taramalar[1].index("--mode") + 1] == "Color"
+    assert "--resolution" in taramalar[1] and "--page-height" in taramalar[1]
+    for yol in sayfalar:
+        with Image.open(yol) as g:
+            assert g.mode == "L"                                  # istenen kip: gri
+    assert ayarlar.oku("ColorOnlyScanners") == ["genesys:libusb:001:004"]
+
+    # sonraki taramada önce çöktürmeden doğrudan renkli taranır
+    s.kagit, s.komutlar = 1, []
+    assert len(yonetici.tara("genesys:libusb:001:004")) == 1
+    assert len(s.taramalar()) == 1 and "Color" in s.taramalar()[0]
+
+
+def test_siyah_beyaz_istenirse_renkliden_cevrilir(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    s = SahteScanimage(CANON_DR_A, kagit=1, gri_coker=True)
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    ayarlar.yaz("Mode", "Lineart")
+    (yol,) = TaramaYoneticisi(ayarlar, calistir=s).tara("genesys:libusb:001:004")
+    with Image.open(yol) as g:
+        assert g.mode == "1"
+
+
+def test_kagit_sikismasi_yinelenmez(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda ad: "/usr/bin/" + ad)
+    s = SahteScanimage(CANON_DR_A)
+
+    def calistir(komut, **kw):
+        if "--batch-start=1" in komut:
+            s.komutlar.append(komut)
+            return Sonuc(6, hata="scanimage: rounded value of br-y from 297 to 296.994\n"
+                                 "scanimage: sane_start: Document feeder jammed")
+        return s(komut, **kw)
+
+    ayarlar = Ayarlar(str(tmp_path / "a.json"))
+    with pytest.raises(TaramaHatasi, match="Kağıt sıkıştı"):
+        TaramaYoneticisi(ayarlar, calistir=calistir).tara("genesys:libusb:001:004")
+    assert len(s.taramalar()) == 1
 
 
 def test_besleyici_bos(tmp_path, monkeypatch):
