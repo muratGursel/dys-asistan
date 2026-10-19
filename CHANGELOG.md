@@ -1,6 +1,8 @@
 # Değişiklikler
 
-## Yayınlanmamış
+## 0.1.1 — 2026-10-19
+
+Canon DR-C225 gibi besleyicili tarayıcılarda tarama.
 
 - Besleyicili tarayıcılar (Canon DR-C225 gibi camsız cihazlar): sayfa boyu
   A4'e ayarlanır, besleyicideki sayfalar tek seferde taranır, besleyici

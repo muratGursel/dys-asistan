@@ -10,4 +10,4 @@ AD = "DYS Asistan"
 UYGULAMA_KIMLIGI = "io.github.muratgursel.DysAsistan"
 PAKET = "dys-asistan"
 PORT = 62222
-__version__ = "0.1.0"
+__version__ = "0.1.1"
