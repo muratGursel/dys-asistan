@@ -66,4 +66,44 @@ EbysAsistan aynı portu tutuyorsa onu kapatın.
 **Tarama hata veriyor.**
 `~/.config/dys-asistan/gunluk.txt` dosyasının son satırlarına bakın;
 `dys-asistan --ayrintili` ile daha ayrıntılı günlük alınır. Günlükte DYS
-oturum bilgisi bulunmaz.
+oturum bilgisi bulunmaz. Sebep anlaşılmıyorsa tanılama aracını çalıştırın.
+
+## Tanılama aracı
+
+Tarayıcı görünmüyor ya da tarama hata veriyorsa tanılama aracı bilgileri
+toplar, olası sebepleri inceler ve sonucu bir dosyaya yazar.
+
+1. Besleyicili tarayıcılarda (ör. Canon DR-C225) besleyiciye **2 sayfa**
+   koyun; araç iki deneme taraması yapar. Camlı tarayıcılarda cama bir sayfa
+   koymanız yeterli.
+2. Uçbirimde **normal kullanıcı olarak** (`sudo` olmadan) çalıştırın:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/muratGursel/dys-asistan/main/tools/dys-tani.sh | sh
+   ```
+
+   İnternete erişimi olmayan bilgisayarlarda `tools/dys-tani.sh` dosyasını
+   kopyalayıp `sh dys-tani.sh` ile çalıştırın.
+3. Araç ağdaki tarayıcıları da aradığı için 1-2 dakika sürer. Bitince sonuç
+   **`~/dys-tani.txt`** dosyasına yazılır ve dosyanın yolu ekranda gösterilir.
+
+Dosyanın sonundaki **"Özet: olası sebepler"** bölümü bulunan sorunları ve
+çözüm önerilerini listeler. Sorunu çözemezseniz dosyayı
+[Issues](https://github.com/muratGursel/dys-asistan/issues) sayfasında yeni
+bir kayda ekleyin.
+
+Araç şunları inceler:
+
+| Denetim | Ortaya çıkarabileceği sebep |
+|---|---|
+| USB aygıt listesi | Tarayıcı bağlı değil ya da kapalı |
+| USB aygıt izinleri | Kullanıcının tarayıcıya erişim izni yok |
+| Aygıtı kullanan işlemler | Tarayıcıyı başka bir uygulama tutuyor |
+| SANE sürücü yapılandırması | Sürücü kapalı ya da cihaz bu SANE sürümünde desteklenmiyor |
+| SANE'in gördüğü tarayıcılar | Cihaz USB'de var ama SANE görmüyor |
+| Cihaz seçenekleri | Tarama alanı A4'ten kısa, sayfa boyu ayarı gerekiyor |
+| İki deneme taraması | Kağıt yok, meşgul, izin, sıkışma, kapak açık, USB iletişim hatası |
+| DYS Asistan | Çalışmıyor; ayarlar ve günlüğün son satırları |
+
+Sonuç dosyasında DYS oturum bilgisi (token) bulunmaz; kullanıcı adı,
+gruplar, sistem ve paket sürümleri ile bağlı cihazların adları bulunur.

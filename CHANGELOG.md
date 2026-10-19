@@ -1,5 +1,17 @@
 # Değişiklikler
 
+## Yayınlanmamış
+
+- Besleyicili tarayıcılar (Canon DR-C225 gibi camsız cihazlar): sayfa boyu
+  A4'e ayarlanır, besleyicideki sayfalar tek seferde taranır, besleyici
+  boşsa anlaşılır ileti verilir. Önceden "rounded value of br-y from 297 to
+  279.364" iletisiyle tarama başarısız oluyordu.
+- Tarama alanı her cihazda cihazın sınırına kırpılır.
+- Hata iletisinde scanimage'ın bilgi satırları yerine asıl hata gösterilir;
+  her başarısızlıkta tarama en az seçenekle yeniden denenir.
+- Tanılama aracı (`tools/dys-tani.sh`): tarayıcı sorunlarının olası
+  sebeplerini inceler, sonucu `~/dys-tani.txt` dosyasına yazar.
+
 ## 0.1.0 — 2026-10-17
 
 İlk sürüm.

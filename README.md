@@ -76,6 +76,17 @@ Ayrıntılar: [docs/KULLANIM.md](docs/KULLANIM.md)
 Tarayıcınız listede yoksa uçbirimde `dys-asistan --tarayicilari-listele`
 komutunun çıktısına bakın; burada görünmeyen bir cihazı DYS de göremez.
 
+## Tarayıcı sorunlarında tanılama
+
+Tarayıcı görünmüyor ya da tarama hata veriyorsa normal kullanıcı olarak
+çalıştırın; sonuç `~/dys-tani.txt` dosyasına yazılır:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/muratGursel/dys-asistan/main/tools/dys-tani.sh | sh
+```
+
+Ayrıntılar: [docs/KULLANIM.md](docs/KULLANIM.md#tanılama-aracı)
+
 ## Geliştirme
 
 [docs/GELISTIRME.md](docs/GELISTIRME.md)
