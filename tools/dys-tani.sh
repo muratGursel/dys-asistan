@@ -77,6 +77,7 @@ done
 grep -rhs -i -E "^\s*usb\s+0x1083" /etc/sane.d/canon_dr.conf 2>/dev/null | head -3 | sed 's/^/  canon_dr.conf: /'
 
 baslik "SANE'in gördüğü tarayıcılar"
+echo "  ... tarayıcılar aranıyor (ağdakiler de arandığı için 1-2 dakika sürebilir)"
 # scanimage -f kabuğun \t ve \n kaçışlarını yorumlamaz; %n satır sonudur, ayraç '|'
 LISTE=$(timeout 90 scanimage -f "%d|%v %m|%t%n" 2>/dev/null)
 YEREL=$(echo "$LISTE" | grep -E "^[a-z0-9_]+:" | grep -v -E "(escl|airscan|v4l):")
@@ -93,6 +94,7 @@ else
     echo "  denenecek cihaz: $D"
 
     baslik "Cihaz seçenekleri (scanimage -A)"
+    echo "  ... cihazın seçenekleri okunuyor"
     SECENEK=$(timeout 60 scanimage -d "$D" -A 2>&1)
     echo "$SECENEK" | grep -E "^\s+(--source|--mode|--resolution|-[lxyt]|--page-width|--page-height)\b" | sed 's/^/  /'
     YMAX=$(echo "$SECENEK" | sed -n 's/^\s*-y [0-9.]*\.\.\([0-9.]*\)mm.*/\1/p')
@@ -110,6 +112,7 @@ else
         ad="$1"; shift
         echo; echo "-- $ad"
         echo "   scanimage -d '$D' $*"
+        echo "   ... taranıyor (en fazla 2 dakika)"
         rm -f /tmp/dys-tani.png
         timeout 120 scanimage -d "$D" "$@" --format=png -o /tmp/dys-tani.png >/tmp/dys-tani.err 2>&1
         kod=$?
@@ -174,4 +177,6 @@ tail -40 "$HOME/.config/dys-asistan/gunluk.txt" 2>/dev/null | sed 's/^/    /'
 } | tee -a "$CIKTI"
 
 echo
-echo "Sonuç dosyası: $CIKTI"
+echo "Tanılama tamamlandı. Yukarıdaki çıktının tamamı şu dosyaya kaydedildi:"
+echo "    $CIKTI"
+echo "Sorun çözülmediyse bu dosyayı destek isteğinize ekleyin."
